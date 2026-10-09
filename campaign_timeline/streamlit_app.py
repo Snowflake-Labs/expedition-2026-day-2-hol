@@ -40,6 +40,8 @@ def load_campaigns() -> pd.DataFrame:
     df.columns = [c.lower() for c in df.columns]
     df["start_date"] = pd.to_datetime(df["start_date"])
     df["end_date"] = pd.to_datetime(df["end_date"])
+    # CRM-only campaigns have no owner team in the source data.
+    df["owner_team"] = df["owner_team"].replace("", None).fillna("Unassigned")
     df["lane"] = df["region"] + " · " + df["audience"]
     return df
 
@@ -152,7 +154,7 @@ order = (
 )
 
 m1, m2, m3 = st.columns(3)
-m1.metric("Audiences getting competing offers", f"{len(colliding)} of {len(peak_by_lane)}")
+m1.metric("Region · audience pairs with competing offers", f"{len(colliding)} of {len(peak_by_lane)}")
 if colliding.empty:
     m2.metric("Most campaigns at once", "1")
     m2.caption("No audience gets more than one campaign at a time.")
@@ -161,10 +163,15 @@ else:
     top = heat.sort_values(["peak", "week"], ascending=[False, True]).iloc[0]
     top_days = daily[daily["lane"] == top["lane"]]
     busiest_day = top_days.groupby("day").size().idxmax()
-    teams = sorted(top_days.loc[top_days["day"] == busiest_day, "team"].unique())
+    owners = top_days.loc[top_days["day"] == busiest_day, "team"]
+    teams = sorted(owners[owners != "Unassigned"].unique())
+    unassigned = int((owners == "Unassigned").sum())
     peak_weeks = heat.loc[(heat["lane"] == top["lane"]) & (heat["peak"] == top["peak"]), "week"]
     m2.metric("Most campaigns at once", f"{top['peak']}")
-    m2.caption(f"{top['lane']} · {len(teams)} {'team' if len(teams) == 1 else 'teams'}: {', '.join(teams)}")
+    owner_note = f"{len(teams)} {'team' if len(teams) == 1 else 'teams'}: {', '.join(teams)}" if teams else "no owner team"
+    if teams and unassigned:
+        owner_note += f" + {unassigned} unassigned"
+    m2.caption(f"{top['lane']} · {owner_note}")
     m3.metric("Peak weeks", f"{peak_weeks.min():%b %-d} – {peak_weeks.max() + timedelta(days=6):%b %-d}")
     m3.caption(top["lane"])
 
